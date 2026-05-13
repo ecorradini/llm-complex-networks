@@ -1,4 +1,4 @@
-# Dynamic Topology Optimization — Experiments
+# Dynamic Topology Optimization
 
 Pipeline for the paper **"Dynamic Topology Optimization in LLM Multi-Agent Systems for Urban Crisis Management: A Complex Network Approach"**.
 
