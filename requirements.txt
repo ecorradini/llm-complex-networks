@@ -1,0 +1,13 @@
+networkx>=3.0
+python-louvain>=0.16
+numpy
+scipy
+pandas
+matplotlib
+requests
+pyyaml
+tqdm
+scikit-learn
+# Optional — code degrades gracefully if not importable
+sentence-transformers
+datasets

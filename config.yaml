@@ -1,0 +1,28 @@
+# Experiment configuration
+experiment:
+  n_crises: 20
+  rounds: 5
+  seed: 42
+
+topology:
+  dytopo_tau: 0.4       # cosine threshold for DyTopo
+  gtd_lambda: 0.1       # risk penalty weight
+  goagent_groups: 3     # number of groups for GoAgent
+  cna_delta: 0.35       # pruning threshold for Dynamic CNA
+
+cost:
+  alpha: 1.0            # token-cost weight
+  beta: 0.5             # information-gain weight
+
+agents:
+  - Health
+  - Traffic
+  - Fire
+  - Water
+  - Police
+  - Logistics
+  - DecisionMaker
+
+llm:
+  backend: mock         # mock | openai
+  mock_fudge: 1.3       # token count fudge factor
