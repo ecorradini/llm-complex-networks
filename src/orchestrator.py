@@ -31,11 +31,15 @@ class Orchestrator:
         agents: Optional[List[Agent]] = None,
         alpha: float = 1.0,
         beta: float = 0.5,
+        k_dm: Optional[int] = None,
+        scheduler: Optional[Any] = None,
     ):
         self.topology = topology
         self.agents = agents or make_agents()
         self.alpha = alpha
         self.beta = beta
+        self.k_dm_override = k_dm
+        self.scheduler = scheduler
 
     # ------------------------------------------------------------------
     def run(self, dataset_item: dict, rounds: int = 5) -> Dict[str, Any]:
@@ -64,6 +68,20 @@ class Orchestrator:
 
         for r in range(rounds):
             t0 = time.time()
+
+            # 0. Adaptive scheduling: refresh (alpha, beta, delta) for this round
+            if self.scheduler is not None:
+                tokens_so_far = sum(log.get("routed_tokens", 0) for log in logs)
+                hvn_history = [log.get("von_neumann_entropy", 0.0) for log in logs]
+                a_t, b_t, d_t = self.scheduler.step(
+                    round_idx=r,
+                    tokens_used=tokens_so_far,
+                    hvn_history=hvn_history,
+                    crisis_type=state.dataset_item.get("crisis_type", ""),
+                )
+                self.alpha, self.beta = a_t, b_t
+                if hasattr(self.topology, "delta"):
+                    self.topology.delta = d_t
 
             # 1. Compute embeddings
             embeddings = {a.role: a.embed_state(state) for a in self.agents}
@@ -152,7 +170,10 @@ class Orchestrator:
         # context; CNA's compact communities normally fit under the cap.
         import math as _math
         dm = next((a for a in self.agents if a.role == "DecisionMaker"), self.agents[-1])
-        K_DM = max(2, int(_math.ceil(2.5 + 3.0 * self.beta)))
+        if self.k_dm_override is not None:
+            K_DM = self.k_dm_override
+        else:
+            K_DM = max(2, int(_math.ceil(2.5 + 3.0 * self.beta)))
         # α attenuates the relevance floor: small positive values would reject
         # peers whose messages are lexically dissimilar to DM's boilerplate.
         # Default α≈1 gives a near-zero floor, so the cap dominates.
@@ -186,7 +207,10 @@ class Orchestrator:
                 continue
             scored.append((u, score, msg_u))
         scored.sort(key=lambda x: -x[1])
-        accepted = scored[:K_DM]
+        if K_DM is None or (isinstance(K_DM, float) and K_DM == float("inf")):
+            accepted = scored
+        else:
+            accepted = scored[:int(K_DM)]
         visible = [m for _, _, m in accepted] + [state.messages.get(dm.role, "")]
 
         seen_clean: List[str] = []

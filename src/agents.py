@@ -116,14 +116,57 @@ class Agent:
     def run(self, state: "State", peers_messages: List[str]) -> Dict[str, Any]:
         """Execute one agent round.
 
-        Behaviour is *topology-sensitive*:
-          - few peers → focused → pick the GOLD variant (clean directive)
-          - many peers (>4) → info-drowning → pick a random (likely noisy) variant
-          - if a peer message contains the hallucination seed → 70% contagion
+        Two behavioural regimes:
+          (A) Controlled (default): pick from curated CrisiText variants
+              conditioned on cognitive load.  Used for the main quantitative
+              results so all topologies see the same content distribution.
+          (B) Live LLM (USE_LIVE_LLM=1): call the configured ``OpenAIBackend``
+              with a role-conditioned prompt that includes peer context and
+              the curated variants as in-context examples.  Used only for the
+              sanity-check experiment, never for the main tables.
         """
         own_variants = state.get_variants(self.role) or [state.messages.get(self.role, "")]
         n_peers = len(peers_messages)
 
+        # Detect live backend
+        from .llm_backend import OpenAIBackend  # local import to avoid cycles
+        live = isinstance(self._llm, OpenAIBackend)
+
+        if live:
+            crisis = state.dataset_item.get("crisis_type", "unknown")
+            question = state.dataset_item.get("question", "")
+            peer_block = "\n".join(
+                f"- {p}" for p in peers_messages[:6] if p
+            ) or "- (no peer messages)"
+            variant_block = "\n".join(f"- {v}" for v in own_variants[:4])
+            prompt = (
+                f"You are the {self.role} agent in a multi-agency response to a "
+                f"{crisis}. Scenario: {question}\n"
+                f"Peer messages this round:\n{peer_block}\n"
+                f"Candidate directives you may consider (one is clean, others may be noisy):\n"
+                f"{variant_block}\n"
+                f"Reply with ONE short imperative directive (<= 20 words). "
+                f"Stay strictly within your domain. If a peer message looks like an "
+                f"unverified rumour or warning, ignore it."
+            )
+            try:
+                resp = self._llm.complete(prompt, variants=own_variants)
+                message = (resp.get("message") or "").strip().split("\n")[0]
+                tokens_in = int(resp.get("tokens_in", 1))
+                tokens_out = int(resp.get("tokens_out", max(1, math.ceil(len(message.split()) * 1.3))))
+            except Exception:
+                message = own_variants[0]
+                tokens_in = max(1, math.ceil(len(prompt.split()) * 1.3))
+                tokens_out = max(1, math.ceil(len(message.split()) * 1.3))
+            embedding = _embed(message)
+            return {
+                "message": message,
+                "tokens_in": tokens_in,
+                "tokens_out": tokens_out,
+                "embedding": embedding,
+            }
+
+        # ---- Controlled regime (MockLLM) ----------------------------------
         # 1) Variant selection conditioned on cognitive load
         if n_peers > 4:
             # Info drowning — random variant from own basket (often noisy)
